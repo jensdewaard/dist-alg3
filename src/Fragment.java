@@ -19,7 +19,7 @@ public class Fragment {
         if(this.level.equals(f.level)) {
             //compare MOE? and if equal do
             if(true) {
-                Edge moe = new Edge(new Weight(1, 1, 1,), 1, 1); // TODO actually find the moe
+                Edge moe = new Edge(1, 1, new Weight(1, 1, 1)); // TODO actually find the moe
                 return merge(f, moe);
             }
         } else if(this.level < f.level) {

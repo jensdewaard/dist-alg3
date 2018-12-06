@@ -3,10 +3,18 @@ public class Weight implements Comparable<Weight> {
     private final Integer lowerId;
     private final Integer higherId;
 
+    public static final Weight INFINITE = new Weight(Integer.MAX_VALUE, -1, -1);
+
     public Weight(int w, int low, int high) {
         this.weight = w;
         this.lowerId = low;
         this.higherId = high;
+    }
+
+    public Weight(Weight weight) {
+        this.weight = weight.weight;
+        this.lowerId = weight.lowerId;
+        this.higherId = weight.lowerId;
     }
 
     @Override
