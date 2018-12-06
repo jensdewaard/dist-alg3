@@ -19,9 +19,15 @@ public class Node implements Runnable, Serializable, INode {
     private Edge testEdge; // the edge this node is currently testing for the moe
     private Map<Edge, EdgeState> edgeStates;
     private final Integer NETWORK_DELAY = 150;
+    private final ArrayList<ReportMessage> reportQueue;
+    private final ArrayList<ConnectMessage> connectQueue;
+    private final ArrayList<TestMessage> testQueue;
 
     public Node(Integer id, List<Integer> neighbourIds) {
         this.id = id;
+        this.reportQueue = new ArrayList<>();
+        this.connectQueue = new ArrayList<>();
+        this.testQueue = new ArrayList<>();
         // Create list of edges connected to this node
         ArrayList<Edge> edges = new ArrayList<>();
         neighbourIds.forEach(n -> {
@@ -33,6 +39,7 @@ public class Node implements Runnable, Serializable, INode {
         });
         Collections.sort(edges);
         this.edges = Collections.unmodifiableList(edges);
+        System.out.println(this.id + ": Created with edge list " + this.edges);
 
         // Keep a list of states corresponding to the above edges
         HashMap<Edge, EdgeState> edgeStates = new HashMap<>();
@@ -59,7 +66,25 @@ public class Node implements Runnable, Serializable, INode {
             }
         }
         if(this.state == NodeState.FIND) {
+            // Maybe switch these around?
+
             test();
+        }
+        if(this.state == NodeState.FOUND) {
+            if(!reportQueue.isEmpty()) {
+                System.out.println(this.id + ": Popping a message from the report queue");
+                ReportMessage m = reportQueue.get(0);
+                reportQueue.remove(0);
+                this.receiveReport(m.from, m.weight);
+            }
+        }
+        if(!testQueue.isEmpty()) {
+            TestMessage tm = testQueue.get(0);
+            if(tm.level <= this.fragmentLevel) {
+                System.out.println(this.id + ": Popping a message from the test queue");
+                testQueue.remove(tm);
+                this.receiveTest(tm.from, tm.level, tm.weight);
+            }
         }
 
     }
@@ -67,9 +92,11 @@ public class Node implements Runnable, Serializable, INode {
     @Override
     public void receiveTest(Integer from, Integer l, Weight FN) throws RemoteException {
         // Fragment VI
-        if(this.state == NodeState.SLEEPING);
+        if(this.state == NodeState.SLEEPING) {
+            wakeup();
+        }
         if(l > this.fragmentLevel) {
-            // TODO append to message queue
+            this.testQueue.add(new TestMessage(from, l, FN));
         }
         else {
             Edge j = identifyEdge(from);
@@ -89,7 +116,7 @@ public class Node implements Runnable, Serializable, INode {
 
     private void sendReject(Edge j) {
         Integer receiveID = getReceiver(j);
-        Node receiver = findNode(receiveID);
+        INode receiver = findNode(receiveID);
         if(receiver == null){
             return;
         }
@@ -108,7 +135,7 @@ public class Node implements Runnable, Serializable, INode {
 
     private void sendAccept(Edge j) {
        Integer receiverId = getReceiver(j);
-       Node receiver = findNode(receiverId);
+       INode receiver = findNode(receiverId);
        if (receiver == null) {
            return;
        }
@@ -125,7 +152,7 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveAccept(Integer from) throws RemoteException {
+    public void receiveAccept(Integer from) {
         // Fragment VIII
         Edge j = identifyEdge(from);
         this.testEdge = null;
@@ -147,7 +174,7 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     private void sendReport(Integer receiverId, Weight bestWeight) {
-        Node receiver = findNode(receiverId);
+        INode receiver = findNode(receiverId);
         if(receiver == null) {
             return;
         }
@@ -165,7 +192,7 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveReject(Integer from) throws RemoteException {
+    public void receiveReject(Integer from) {
         // Fragment VII
         Edge j = identifyEdge(from);
         if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
@@ -175,7 +202,7 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveReport(Integer from, Weight w) throws RemoteException {
+    public void receiveReport(Integer from, Weight w) {
         // Fragment X
         Edge j = identifyEdge(from);
         if(!j.equals(inBranch)) {
@@ -187,7 +214,7 @@ public class Node implements Runnable, Serializable, INode {
             report();
         } else {
             if(this.state == NodeState.FIND) {
-                // TODO add to message queue
+                this.reportQueue.add(new ReportMessage(from, w));
             } else {
                 if(w.compareTo(bestWeight) > 0) {
                     changeRoot();
@@ -212,7 +239,7 @@ public class Node implements Runnable, Serializable, INode {
 
     private void sendChangeRoot(Edge j) {
         Integer receiverID = getReceiver(j);
-        Node receiver = findNode(receiverID);
+        INode receiver = findNode(receiverID);
         if(receiver == null) {
             return;
         }
@@ -236,7 +263,7 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveConnect(Integer from, Integer value) throws RemoteException {
+    public void receiveConnect(Integer from, Integer value) {
         // Fragment III
         if(this.state == NodeState.SLEEPING) {
             wakeup();
@@ -247,7 +274,7 @@ public class Node implements Runnable, Serializable, INode {
             sendInitiate(j, fragmentLevel, fragmentName, state);
         } else {
             if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
-                // TODO append to queue?
+                this.connectQueue.add(new ConnectMessage(from, value, j));
             } else {
                 sendInitiate(j, fragmentLevel + 1, j.weight, NodeState.FIND);
             }
@@ -257,7 +284,7 @@ public class Node implements Runnable, Serializable, INode {
 
     private void sendInitiate(Edge j, Integer fragmentLevel, Weight fragmentName, NodeState state) {
         Integer receiverID = getReceiver(j);
-        Node receiver = findNode(receiverID);
+        INode receiver = findNode(receiverID);
         if (receiver == null) {
             return;
         }
@@ -308,7 +335,7 @@ public class Node implements Runnable, Serializable, INode {
 
     private void sendConnect(Edge e, Integer value) {
         Integer receiverId = getReceiver(e);
-        Node receiver = findNode(receiverId);
+        INode receiver = findNode(receiverId);
         if(receiver == null) {
             return; // is just nothing doing anything reasonable? what is a reasonable fallback?
         }
@@ -340,7 +367,7 @@ public class Node implements Runnable, Serializable, INode {
 
     private void sendTest(Edge e, Integer fragmentLevel, Weight fragmentName) {
         Integer receiverId = getReceiver(e);
-        Node receiver = findNode(receiverId);
+        INode receiver = findNode(receiverId);
         if(receiver == null) {
             return;
         }
@@ -362,7 +389,18 @@ public class Node implements Runnable, Serializable, INode {
         Map<Edge, EdgeState> tempMap = new HashMap<>(this.edgeStates);
         tempMap.put(edge, state);
         this.edgeStates = Collections.unmodifiableMap(tempMap);
-
+        ConnectMessage cm = null;
+        for(ConnectMessage m : connectQueue) {
+            if(this.edgeStates.get(m) != EdgeState.UNKNOWN) {
+               cm = m;
+               break;
+            }
+        }
+        if(cm != null) {
+            System.out.println("Popping a message from the request queue");
+            connectQueue.remove(cm);
+            this.receiveConnect(cm.from, cm.value);
+        }
     }
 
     private Integer getReceiver(Edge e) {
@@ -376,7 +414,7 @@ public class Node implements Runnable, Serializable, INode {
         }
     }
 
-    private Node findNode(Integer nodeId) {
+    private INode findNode(Integer nodeId) {
         INode node = null;
         try {
             node = (INode) Naming.lookup("//localhost:1099/p" + nodeId);
@@ -385,16 +423,21 @@ public class Node implements Runnable, Serializable, INode {
                 node = (INode) Naming.lookup("//ip:1099/p" + nodeId);
             } catch (NotBoundException | MalformedURLException | RemoteException ignored) {}
         } catch (MalformedURLException | RemoteException ignored) {}
-        return null;
+        return node;
     }
 
     private Edge identifyEdge(Integer from) {
+        System.out.println(this.id + ": Trying to find an edge to or from " + from);
         for (Edge e : this.edges) {
             if (e.source.equals(from) || e.target.equals(from)) {
                 return e;
             }
         }
         throw new RuntimeException("Node " + this.id + " is not familiar with an edge to " + from);
+    }
+
+    public void printStatus() {
+        System.out.println("[Node: " + this.id + ", Level: " + this.fragmentLevel + ", Core: " + this.fragmentName + "]");
     }
 
 }

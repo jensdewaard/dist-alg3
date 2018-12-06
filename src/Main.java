@@ -24,9 +24,9 @@ public class Main {
         INode stub4 = (INode) UnicastRemoteObject.exportObject(four, 0);
 
         registry.bind("p1", stub1);
-        registry.bind("p2", stub1);
-        registry.bind("p3", stub1);
-        registry.bind("p4", stub1);
+        registry.bind("p2", stub2);
+        registry.bind("p3", stub3);
+        registry.bind("p4", stub4);
 
         new Thread(one).start();
         new Thread(two).start();
@@ -39,6 +39,11 @@ public class Main {
                 registry.unbind("p2");
                 registry.unbind("p3");
                 registry.unbind("p4");
+
+                one.printStatus();
+                two.printStatus();
+                three.printStatus();
+                four.printStatus();
             } catch (RemoteException | NotBoundException e) {
                 e.printStackTrace();
             }

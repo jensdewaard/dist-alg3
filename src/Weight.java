@@ -1,4 +1,6 @@
-public class Weight implements Comparable<Weight> {
+import java.io.Serializable;
+
+public class Weight implements Serializable, Comparable<Weight> {
     private final Integer weight;
     private final Integer lowerId;
     private final Integer higherId;
@@ -14,7 +16,7 @@ public class Weight implements Comparable<Weight> {
     public Weight(Weight weight) {
         this.weight = weight.weight;
         this.lowerId = weight.lowerId;
-        this.higherId = weight.lowerId;
+        this.higherId = weight.higherId;
     }
 
     @Override
@@ -40,6 +42,11 @@ public class Weight implements Comparable<Weight> {
                     higherId.equals(((Weight) other).higherId);
         }
         return false;
+    }
+
+    @Override
+    public String toString() {
+        return "[" + this.weight + "," + this.lowerId + "," + this.higherId + "]";
     }
 
     public int hashCode() {
