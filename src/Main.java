@@ -1,51 +1,57 @@
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.rmi.AccessException;
 import java.rmi.AlreadyBoundException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Scanner;
 
 public class Main {
 
-    public static void main(String[] args) throws RemoteException, AlreadyBoundException {
-//        if (System.getSecurityManager() == null) {
-//            System.setSecurityManager(new SecurityManager());
-//        }
-        Registry registry = LocateRegistry.getRegistry("0.0.0.0",1099);
-        Node one = new Node(1,  List.of(2, 4));
-        Node two = new Node(2, List.of(1, 3));
-        Node three = new Node(3, List.of(2, 4));
-        Node four = new Node(4, List.of(3, 1));
+    public static void main(String[] args) throws RemoteException, AlreadyBoundException, FileNotFoundException {
+        FileReader fileReader = new FileReader(args[0]);
+        Scanner scanner = new Scanner(fileReader);
 
-        INode stub1 = (INode) UnicastRemoteObject.exportObject(one, 0);
-        INode stub2 = (INode) UnicastRemoteObject.exportObject(two, 0);
-        INode stub3 = (INode) UnicastRemoteObject.exportObject(three, 0);
-        INode stub4 = (INode) UnicastRemoteObject.exportObject(four, 0);
+        List<Integer> allIds = new ArrayList<>();
+        List<Node> nodes = new ArrayList<>();
+        Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+        while (scanner.hasNextLine()) {
+            int id = scanner.nextInt();
+            allIds.add(id);
 
-        registry.bind("p1", stub1);
-        registry.bind("p2", stub2);
-        registry.bind("p3", stub3);
-        registry.bind("p4", stub4);
+            List<Integer> inputList = new ArrayList<>();
+            while (scanner.hasNextInt()) {
+                inputList.add(scanner.nextInt());
+            }
+            Node node = new Node(id, Collections.unmodifiableList(inputList));
+            nodes.add(node);
 
-        new Thread(one).start();
-        new Thread(two).start();
-        new Thread(three).start();
-        new Thread(four).start();
+            INode stub = (INode) UnicastRemoteObject.exportObject(node, 1098);
+
+            registry.bind("p" + id, stub);
+
+            new Thread(node).start();
+            scanner.next();
+        }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            try {
-                registry.unbind("p1");
-                registry.unbind("p2");
-                registry.unbind("p3");
-                registry.unbind("p4");
-
-                one.printStatus();
-                two.printStatus();
-                three.printStatus();
-                four.printStatus();
-            } catch (RemoteException | NotBoundException e) {
-                e.printStackTrace();
+            for (Node node : nodes) {
+                node.printStatus();
+            }
+            for (Integer id : allIds) {
+                try {
+                    registry.unbind("p" + id);
+                } catch (RemoteException e) {
+                    e.printStackTrace();
+                } catch (NotBoundException e) {
+                    e.printStackTrace();
+                }
             }
         }));
 
