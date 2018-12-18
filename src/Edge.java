@@ -22,6 +22,19 @@ public class Edge implements Comparable<Edge> {
         return weight.compareTo(edge.weight);
     }
 
+    @Override
+    public boolean equals(Object o){
+        if(o == null) {
+            return false;
+        }
+        if(o instanceof Edge) {
+            return this.source.equals(((Edge) o).source) &&
+                    this.target.equals(((Edge) o).target) &&
+                    this.weight.equals(((Edge) o).weight);
+        }
+        return false;
+    }
+
     public String toString() {
         return "[" + source + ", " + target + "]";
     }

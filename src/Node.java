@@ -15,7 +15,7 @@ public class Node implements Runnable, Serializable, INode {
     private Edge inBranch = null;  // the edge that leads to the fragment core
     private Integer findCount; // the number of reports still expected
     private Edge bestEdge; // the edge leading towards the best candidate for the moe
-    private Weight bestWeight; // the weight of the best candidate for the moe
+    private Weight bestWeight = Weight.INFINITE; // the weight of the best candidate for the moe
     private Edge testEdge; // the edge this node is currently testing for the moe
     private Map<Edge, EdgeState> edgeStates;
     private final Integer NETWORK_DELAY = 150;
@@ -48,9 +48,10 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveInitiate(Integer id, Integer L, Weight F, NodeState S) throws RemoteException {
+    public void receiveInitiate(Integer from, Integer L, Weight F, NodeState S) throws RemoteException {
         // Fragment IV
-        Edge j = identifyEdge(id);
+        System.out.println(from + " -> " + this.id + " INITIATE");
+        Edge j = identifyEdge(from);
         this.fragmentLevel = L;
         this.fragmentName = F;
         this.state = S;
@@ -61,13 +62,11 @@ public class Node implements Runnable, Serializable, INode {
             if(!i.equals(j) && this.edgeStates.get(i) == EdgeState.IN_MST) {
                 sendInitiate(i, L, F, S);
                 if(this.state == NodeState.FIND) {
-                    findCount = findCount + 1;
+                    this.findCount++;
                 }
             }
         }
         if(this.state == NodeState.FIND) {
-            // Maybe switch these around?
-
             test();
         }
         if(this.state == NodeState.FOUND) {
@@ -92,10 +91,12 @@ public class Node implements Runnable, Serializable, INode {
     @Override
     public void receiveTest(Integer from, Integer l, Weight FN) throws RemoteException {
         // Fragment VI
+        System.out.println(from + " -> " + this.id + " TEST");
         if(this.state == NodeState.SLEEPING) {
             wakeup();
         }
         if(l > this.fragmentLevel) {
+            System.out.println(this.id + ": Appending to TEST Queue");
             this.testQueue.add(new TestMessage(from, l, FN));
         }
         else {
@@ -105,7 +106,8 @@ public class Node implements Runnable, Serializable, INode {
             } else {
                 if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
                     this.updateEdgeState(j, EdgeState.NOT_IN_MST);
-                } else if (!j.equals(this.testEdge)) {
+                }
+                if (!j.equals(this.testEdge)) {
                     sendReject(j);
                 } else {
                     test();
@@ -115,10 +117,10 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     private void sendReject(Edge j) {
-        Integer receiveID = getReceiver(j);
-        INode receiver = findNode(receiveID);
+        Integer receiverId = getReceiver(j);
+        INode receiver = findNode(receiverId);
         if(receiver == null){
-            return;
+            throw new RuntimeException("Unable to find Node with id " + receiverId);
         }
         Runnable send = () -> {
             try {
@@ -137,7 +139,7 @@ public class Node implements Runnable, Serializable, INode {
        Integer receiverId = getReceiver(j);
        INode receiver = findNode(receiverId);
        if (receiver == null) {
-           return;
+           throw new RuntimeException("Unable to find Node with id " + receiverId);
        }
        Runnable send = () -> {
            try {
@@ -154,6 +156,7 @@ public class Node implements Runnable, Serializable, INode {
     @Override
     public void receiveAccept(Integer from) {
         // Fragment VIII
+        System.out.println(from + " -> " + this.id + " ACCEPT");
         Edge j = identifyEdge(from);
         this.testEdge = null;
         if(j.weight.compareTo(bestWeight) < 0) {
@@ -176,13 +179,13 @@ public class Node implements Runnable, Serializable, INode {
     private void sendReport(Integer receiverId, Weight bestWeight) {
         INode receiver = findNode(receiverId);
         if(receiver == null) {
-            return;
+            throw new RuntimeException("Unable to find node with id " + receiverId);
         }
         Weight W = new Weight(bestWeight);
         Runnable send = () -> {
             try {
                 Random random = new Random();
-                Thread.sleep(NETWORK_DELAY);
+                Thread.sleep(random.nextInt(NETWORK_DELAY));
                 receiver.receiveReport(this.id, W);
             } catch (RemoteException e) {
                 e.printStackTrace();
@@ -194,6 +197,7 @@ public class Node implements Runnable, Serializable, INode {
     @Override
     public void receiveReject(Integer from) {
         // Fragment VII
+        System.out.println(from + " -> " + this.id + " REJECT");
         Edge j = identifyEdge(from);
         if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
             this.updateEdgeState(j, EdgeState.NOT_IN_MST);
@@ -204,6 +208,7 @@ public class Node implements Runnable, Serializable, INode {
     @Override
     public void receiveReport(Integer from, Weight w) {
         // Fragment X
+        System.out.println(from + " -> " + this.id + " REPORT");
         Edge j = identifyEdge(from);
         if(!j.equals(inBranch)) {
             this.findCount -= 1;
@@ -214,6 +219,7 @@ public class Node implements Runnable, Serializable, INode {
             report();
         } else {
             if(this.state == NodeState.FIND) {
+                System.out.println(this.id + ": Appending to REPORT queue");
                 this.reportQueue.add(new ReportMessage(from, w));
             } else {
                 if(w.compareTo(bestWeight) > 0) {
@@ -238,10 +244,10 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     private void sendChangeRoot(Edge j) {
-        Integer receiverID = getReceiver(j);
-        INode receiver = findNode(receiverID);
+        Integer receiverId = getReceiver(j);
+        INode receiver = findNode(receiverId);
         if(receiver == null) {
-            return;
+            throw new RuntimeException("Unable to find node with id " + receiverId);
         }
         Runnable send = () -> {
             try {
@@ -265,6 +271,7 @@ public class Node implements Runnable, Serializable, INode {
     @Override
     public void receiveConnect(Integer from, Integer value) {
         // Fragment III
+        System.out.println(from + " -> " + this.id + " CONNECT");
         if(this.state == NodeState.SLEEPING) {
             wakeup();
         }
@@ -272,8 +279,12 @@ public class Node implements Runnable, Serializable, INode {
         if(value < this.fragmentLevel) {
             updateEdgeState(j, EdgeState.IN_MST);
             sendInitiate(j, fragmentLevel, fragmentName, state);
+            if(this.state == NodeState.FIND) {
+                this.findCount++;
+            }
         } else {
             if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
+                System.out.println(this.id + ": Appending to CONNECT queue");
                 this.connectQueue.add(new ConnectMessage(from, value, j));
             } else {
                 sendInitiate(j, fragmentLevel + 1, j.weight, NodeState.FIND);
@@ -283,19 +294,16 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     private void sendInitiate(Edge j, Integer fragmentLevel, Weight fragmentName, NodeState state) {
-        Integer receiverID = getReceiver(j);
-        INode receiver = findNode(receiverID);
+        Integer receiverId = getReceiver(j);
+        INode receiver = findNode(receiverId);
         if (receiver == null) {
-            return;
+            throw new RuntimeException("Unable to find node with id " + receiverId);
         }
-        Weight FN = new Weight(fragmentName);
-        NodeState NS = state;
-
         Runnable send = () -> {
             try {
                 Random random = new Random();
                 Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveInitiate(this.id, fragmentLevel, FN, NS);
+                receiver.receiveInitiate(this.id, fragmentLevel, fragmentName, state);
             } catch (InterruptedException ignored) {
             } catch (RemoteException e) {
                 e.printStackTrace();
@@ -305,8 +313,9 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveChangeRoot(Integer from) throws RemoteException {
-       changeRoot();
+    public void receiveChangeRoot(Integer from) {
+        System.out.println(from + " -> " + id + " CHANGE-ROOT");
+        changeRoot();
     }
 
     @Override
@@ -319,16 +328,22 @@ public class Node implements Runnable, Serializable, INode {
             e.printStackTrace();
         }
         if(this.state == NodeState.SLEEPING) {
-            System.out.println(this.id + ": Starting up");
             wakeup();
         }
     }
 
     private void wakeup() {
         // Code Fragment II : Waking up
-        // TODO check if edge list is sorted on increasing weight
         Edge j = this.edges.get(0); // Edge list should be sorted on increasing weight
+        System.out.println(this.id + ": Waking up");
+        if(this.edges.size() > 1) {
+            if(j.compareTo(this.edges.get(1)) >= 0) {
+                throw new RuntimeException("Edges are not sorted by weight");
+            }
+        }
         updateEdgeState(j, EdgeState.IN_MST);
+        this.fragmentLevel = 0;
+        this.state = NodeState.FOUND;
         this.findCount = 0;
         sendConnect(j, 0);
     }
@@ -337,7 +352,7 @@ public class Node implements Runnable, Serializable, INode {
         Integer receiverId = getReceiver(e);
         INode receiver = findNode(receiverId);
         if(receiver == null) {
-            return; // is just nothing doing anything reasonable? what is a reasonable fallback?
+            throw new RuntimeException("Unable to find node with id " + receiverId);
         }
         Runnable send = () -> {
             try {
@@ -369,7 +384,7 @@ public class Node implements Runnable, Serializable, INode {
         Integer receiverId = getReceiver(e);
         INode receiver = findNode(receiverId);
         if(receiver == null) {
-            return;
+            throw new RuntimeException("Unable to find node with id " + receiverId);
         }
         Weight FN = new Weight(fragmentName);
         Runnable send = () -> {
@@ -404,6 +419,9 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     private Integer getReceiver(Edge e) {
+        if (e == null) {
+            throw new RuntimeException("Edge e cannot be null");
+        }
         if(e.source.equals(this.id)) {
             return e.target;
         } else if (e.target.equals(this.id)) {
@@ -427,7 +445,7 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     private Edge identifyEdge(Integer from) {
-        System.out.println(this.id + ": Trying to find an edge to or from " + from);
+//        System.out.println(this.id + ": Trying to find an edge to or from " + from);
         for (Edge e : this.edges) {
             if (e.source.equals(from) || e.target.equals(from)) {
                 return e;
