@@ -40,7 +40,7 @@ public class Node implements Runnable, Serializable, INode {
         Collections.sort(edges);
         this.edges = Collections.unmodifiableList(edges);
         System.out.println(this.id + ": Created with edge list " + this.edges);
-
+        this.fragmentName = this.edges.get(0).weight;
         // Keep a list of states corresponding to the above edges
         HashMap<Edge, EdgeState> edgeStates = new HashMap<>();
         this.edges.forEach(e -> edgeStates.put(e, EdgeState.UNKNOWN));
@@ -89,30 +89,20 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveTest(Integer from, Integer l, Weight FN) throws RemoteException {
+    public void receiveTest(Integer from, Integer l, Weight FN) {
         // Fragment VI
         System.out.println(from + " -> " + this.id + " TEST");
         if(this.state == NodeState.SLEEPING) {
             wakeup();
         }
-        if(l > this.fragmentLevel) {
+        Edge j = identifyEdge(from);
+        if(this.fragmentName.equals(FN)) {
+            sendReject(j);
+        } else if (this.fragmentLevel <= l) {
+            sendAccept(j);
+        } else {
             System.out.println(this.id + ": Appending to TEST Queue");
             this.testQueue.add(new TestMessage(from, l, FN));
-        }
-        else {
-            Edge j = identifyEdge(from);
-            if(!FN.equals(this.fragmentName)) {
-                sendAccept(j);
-            } else {
-                if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
-                    this.updateEdgeState(j, EdgeState.NOT_IN_MST);
-                }
-                if (!j.equals(this.testEdge)) {
-                    sendReject(j);
-                } else {
-                    test();
-                }
-            }
         }
     }
 
@@ -199,9 +189,7 @@ public class Node implements Runnable, Serializable, INode {
         // Fragment VII
         System.out.println(from + " -> " + this.id + " REJECT");
         Edge j = identifyEdge(from);
-        if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
-            this.updateEdgeState(j, EdgeState.NOT_IN_MST);
-        }
+        this.updateEdgeState(j, EdgeState.NOT_IN_MST);
         test();
     }
 
@@ -403,9 +391,14 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     private void updateEdgeState(Edge edge, EdgeState state) {
+        if(this.edgeStates.get(edge) != EdgeState.UNKNOWN && this.edgeStates.get(edge) != state) {
+            throw new RuntimeException("Changing already set edge state. States should be stable");
+        }
         Map<Edge, EdgeState> tempMap = new HashMap<>(this.edgeStates);
         tempMap.put(edge, state);
         this.edgeStates = Collections.unmodifiableMap(tempMap);
+
+
         ConnectMessage cm = null;
         for(ConnectMessage m : connectQueue) {
             if(this.edgeStates.get(m) != EdgeState.UNKNOWN) {
