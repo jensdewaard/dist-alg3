@@ -277,6 +277,7 @@ public class Node implements Runnable, Serializable, INode {
         }
         Edge j = identifyEdge(from);
         if(value < this.fragmentLevel) {
+            System.out.println(this.id + ": ABSORB");
             updateEdgeState(j, EdgeState.IN_MST);
             sendInitiate(j, fragmentLevel, fragmentName, state);
             if(this.state == NodeState.FIND) {
@@ -287,6 +288,7 @@ public class Node implements Runnable, Serializable, INode {
                 System.out.println(this.id + ": Appending to CONNECT queue");
                 this.connectQueue.add(new ConnectMessage(from, value, j));
             } else {
+                System.out.println(this.id + ": MERGE");
                 sendInitiate(j, fragmentLevel + 1, j.weight, NodeState.FIND);
             }
         }
@@ -327,7 +329,7 @@ public class Node implements Runnable, Serializable, INode {
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        if(this.state == NodeState.SLEEPING) {
+        if(this.state == NodeState.SLEEPING && this.id.equals(1)) {
             wakeup();
         }
     }
