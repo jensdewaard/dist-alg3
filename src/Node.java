@@ -11,7 +11,7 @@ public class Node implements Runnable, Serializable, INode {
     private final Integer id;
     private NodeState state = NodeState.SLEEPING;
     private Integer fragmentLevel = 0; // the level of the fragment this node belongs to
-    private Weight fragmentName = null; // the name of the fragment this node belongs to
+    private Weight fragmentName; // the name of the fragment this node belongs to
     private Edge inBranch = null;  // the edge that leads to the fragment core
     private Integer findCount; // the number of reports still expected
     private Edge bestEdge; // the edge leading towards the best candidate for the moe
@@ -23,7 +23,7 @@ public class Node implements Runnable, Serializable, INode {
     private final ArrayList<ConnectMessage> connectQueue;
     private final ArrayList<TestMessage> testQueue;
 
-    public Node(Integer id, List<Integer> neighbourIds) {
+    Node(Integer id, List<Integer> neighbourIds) {
         this.id = id;
         this.reportQueue = new ArrayList<>();
         this.connectQueue = new ArrayList<>();
@@ -47,8 +47,7 @@ public class Node implements Runnable, Serializable, INode {
         this.edgeStates = Collections.unmodifiableMap(edgeStates);
     }
 
-    @Override
-    public void receiveInitiate(Integer from, Integer L, Weight F, NodeState S) throws RemoteException {
+    private void receiveInitiate(Integer from, Integer L, Weight F, NodeState S) {
         // Fragment IV
         System.out.println(from + " -> " + this.id + " INITIATE");
         Edge j = identifyEdge(from);
@@ -60,7 +59,7 @@ public class Node implements Runnable, Serializable, INode {
         this.bestWeight = Weight.INFINITE;
         for(Edge i : this.edges)  {
             if(!i.equals(j) && this.edgeStates.get(i) == EdgeState.IN_MST) {
-                sendInitiate(i, L, F, S);
+                sendMessage(MessageType.INITIATE, i, F, L, S);
                 if(this.state == NodeState.FIND) {
                     this.findCount++;
                 }
@@ -88,8 +87,7 @@ public class Node implements Runnable, Serializable, INode {
 
     }
 
-    @Override
-    public void receiveTest(Integer from, Integer l, Weight FN) {
+    private void receiveTest(Integer from, Integer l, Weight FN) {
         // Fragment VI
         System.out.println(from + " -> " + this.id + " TEST");
         if(this.state == NodeState.SLEEPING) {
@@ -97,54 +95,16 @@ public class Node implements Runnable, Serializable, INode {
         }
         Edge j = identifyEdge(from);
         if(this.fragmentName.equals(FN)) {
-            sendReject(j);
+            sendMessage(MessageType.REJECT, j, null, null, null);
         } else if (this.fragmentLevel <= l) {
-            sendAccept(j);
+            sendMessage(MessageType.ACCEPT, j, null, null, null);
         } else {
             System.out.println(this.id + ": Appending to TEST Queue");
             this.testQueue.add(new TestMessage(from, l, FN));
         }
     }
 
-    private void sendReject(Edge j) {
-        Integer receiverId = getReceiver(j);
-        INode receiver = findNode(receiverId);
-        if(receiver == null){
-            throw new RuntimeException("Unable to find Node with id " + receiverId);
-        }
-        Runnable send = () -> {
-            try {
-                Random random = new Random();
-                Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveReject(this.id);
-            } catch (RemoteException e) {
-                e.printStackTrace();
-            } catch (InterruptedException ignored) {
-            }
-        };
-        new Thread(send).start();
-    }
-
-    private void sendAccept(Edge j) {
-       Integer receiverId = getReceiver(j);
-       INode receiver = findNode(receiverId);
-       if (receiver == null) {
-           throw new RuntimeException("Unable to find Node with id " + receiverId);
-       }
-       Runnable send = () -> {
-           try {
-               Random random = new Random();
-               Thread.sleep(random.nextInt(NETWORK_DELAY));
-               receiver.receiveAccept(this.id);
-           } catch (RemoteException e) {
-               e.printStackTrace();
-           } catch (InterruptedException ignored) {}
-       };
-       new Thread(send).start();
-    }
-
-    @Override
-    public void receiveAccept(Integer from) {
+    private void receiveAccept(Integer from) {
         // Fragment VIII
         System.out.println(from + " -> " + this.id + " ACCEPT");
         Edge j = identifyEdge(from);
@@ -161,31 +121,11 @@ public class Node implements Runnable, Serializable, INode {
         // Fragment IX
         if(this.findCount == 0 && this.testEdge == null) {
             this.state = NodeState.FOUND;
-            Integer receiver = getReceiver(inBranch);
-            sendReport(receiver, this.bestWeight);
+            sendMessage(MessageType.REPORT, inBranch, this.bestWeight, null, null);
         }
     }
 
-    private void sendReport(Integer receiverId, Weight bestWeight) {
-        INode receiver = findNode(receiverId);
-        if(receiver == null) {
-            throw new RuntimeException("Unable to find node with id " + receiverId);
-        }
-        Weight W = new Weight(bestWeight);
-        Runnable send = () -> {
-            try {
-                Random random = new Random();
-                Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveReport(this.id, W);
-            } catch (RemoteException e) {
-                e.printStackTrace();
-            } catch (InterruptedException ignored) {}
-        };
-        new Thread(send).start();
-    }
-
-    @Override
-    public void receiveReject(Integer from) {
+    private void receiveReject(Integer from) {
         // Fragment VII
         System.out.println(from + " -> " + this.id + " REJECT");
         Edge j = identifyEdge(from);
@@ -193,10 +133,9 @@ public class Node implements Runnable, Serializable, INode {
         test();
     }
 
-    @Override
-    public void receiveReport(Integer from, Weight w) {
+    private void receiveReport(Integer from, Weight w) {
         // Fragment X
-        System.out.println(from + " -> " + this.id + " REPORT");
+        System.out.println(from + " -> " + this.id + " REPORT: w = " + w);
         Edge j = identifyEdge(from);
         if(!j.equals(inBranch)) {
             this.findCount -= 1;
@@ -211,8 +150,10 @@ public class Node implements Runnable, Serializable, INode {
                 this.reportQueue.add(new ReportMessage(from, w));
             } else {
                 if(w.compareTo(bestWeight) > 0) {
+                    System.out.println(this.id + ": Changing root...");
                     changeRoot();
                 } else {
+                    System.out.println(this.id + ": Not changing root, might halt");
                     if(w.equals(bestWeight) && bestWeight.equals(Weight.INFINITE)) {
                         HALT();
                     }
@@ -224,30 +165,11 @@ public class Node implements Runnable, Serializable, INode {
     private void changeRoot() {
         // Fragment XI
         if(this.edgeStates.get(bestEdge) == EdgeState.IN_MST) {
-            sendChangeRoot(bestEdge);
+            sendMessage(MessageType.CHANGEROOT, bestEdge, null, null, null);
         } else {
-            this.sendConnect(bestEdge, this.fragmentLevel);
+            sendMessage(MessageType.CONNECT, bestEdge, null, this.fragmentLevel, null);
             updateEdgeState(bestEdge, EdgeState.IN_MST);
         }
-    }
-
-    private void sendChangeRoot(Edge j) {
-        Integer receiverId = getReceiver(j);
-        INode receiver = findNode(receiverId);
-        if(receiver == null) {
-            throw new RuntimeException("Unable to find node with id " + receiverId);
-        }
-        Runnable send = () -> {
-            try {
-                Random random = new Random();
-                Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveChangeRoot(this.id);
-            } catch (RemoteException e) {
-                e.printStackTrace();
-            } catch (InterruptedException ignored) {
-            }
-        };
-        new Thread(send).start();
     }
 
     private void HALT() {
@@ -256,8 +178,7 @@ public class Node implements Runnable, Serializable, INode {
         System.out.println("HALT!");
     }
 
-    @Override
-    public void receiveConnect(Integer from, Integer value) {
+    private void receiveConnect(Integer from, Integer value) {
         // Fragment III
         System.out.println(from + " -> " + this.id + " CONNECT");
         if(this.state == NodeState.SLEEPING) {
@@ -267,7 +188,7 @@ public class Node implements Runnable, Serializable, INode {
         if(value < this.fragmentLevel) {
             System.out.println(this.id + ": ABSORB");
             updateEdgeState(j, EdgeState.IN_MST);
-            sendInitiate(j, fragmentLevel, fragmentName, state);
+            this.sendMessage(MessageType.INITIATE, j, fragmentName, fragmentLevel, state);
             if(this.state == NodeState.FIND) {
                 this.findCount++;
             }
@@ -277,35 +198,43 @@ public class Node implements Runnable, Serializable, INode {
                 this.connectQueue.add(new ConnectMessage(from, value, j));
             } else {
                 System.out.println(this.id + ": MERGE");
-                sendInitiate(j, fragmentLevel + 1, j.weight, NodeState.FIND);
+                sendMessage(MessageType.INITIATE, j, j.weight, fragmentLevel +1, NodeState.FIND);
             }
         }
-
     }
 
-    private void sendInitiate(Edge j, Integer fragmentLevel, Weight fragmentName, NodeState state) {
-        Integer receiverId = getReceiver(j);
-        INode receiver = findNode(receiverId);
-        if (receiver == null) {
-            throw new RuntimeException("Unable to find node with id " + receiverId);
-        }
-        Runnable send = () -> {
-            try {
-                Random random = new Random();
-                Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveInitiate(this.id, fragmentLevel, fragmentName, state);
-            } catch (InterruptedException ignored) {
-            } catch (RemoteException e) {
-                e.printStackTrace();
-            }
-        };
-        new Thread(send).start();
+    private void receiveChangeRoot(Integer from) {
+        System.out.println(from + " -> " + id + " CHANGE-ROOT");
+        changeRoot();
     }
 
     @Override
-    public void receiveChangeRoot(Integer from) {
-        System.out.println(from + " -> " + id + " CHANGE-ROOT");
-        changeRoot();
+    public void receiveMessage(MessageType type, Integer from, Weight core, Integer level, NodeState state) {
+        switch(type) {
+            case ACCEPT:
+                this.receiveAccept(from);
+                break;
+            case REJECT:
+                this.receiveReject(from);
+                break;
+            case TEST:
+                this.receiveTest(from, level, core);
+                break;
+            case REPORT:
+                this.receiveReport(from, core);
+                break;
+            case CHANGEROOT:
+                this.receiveChangeRoot(from);
+                break;
+            case CONNECT:
+                this.receiveConnect(from, level);
+                break;
+            case INITIATE:
+                this.receiveInitiate(from, level, core, state);
+                break;
+            default:
+                throw new RuntimeException("Unknown message type received");
+        }
     }
 
     @Override
@@ -335,26 +264,7 @@ public class Node implements Runnable, Serializable, INode {
         this.fragmentLevel = 0;
         this.state = NodeState.FOUND;
         this.findCount = 0;
-        sendConnect(j, 0);
-    }
-
-    private void sendConnect(Edge e, Integer value) {
-        Integer receiverId = getReceiver(e);
-        INode receiver = findNode(receiverId);
-        if(receiver == null) {
-            throw new RuntimeException("Unable to find node with id " + receiverId);
-        }
-        Runnable send = () -> {
-            try {
-                Random random = new Random();
-                Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveConnect(this.id, value);
-            } catch (InterruptedException ignored) {
-            } catch (RemoteException e1) {
-                e1.printStackTrace();
-            }
-        };
-        new Thread(send).start();
+        sendMessage(MessageType.CONNECT, j, null, fragmentLevel, null);
     }
 
     private void test() {
@@ -362,32 +272,12 @@ public class Node implements Runnable, Serializable, INode {
         for(Edge e : this.edges) {
             if(this.edgeStates.get(e) == EdgeState.UNKNOWN) {
                 this.testEdge = e;
-                sendTest(e, fragmentLevel, fragmentName);
+                sendMessage(MessageType.TEST, e, fragmentName, fragmentLevel, null);
                 return;
             }
         }
         this.testEdge = null;
         report();
-    }
-
-    private void sendTest(Edge e, Integer fragmentLevel, Weight fragmentName) {
-        Integer receiverId = getReceiver(e);
-        INode receiver = findNode(receiverId);
-        if(receiver == null) {
-            throw new RuntimeException("Unable to find node with id " + receiverId);
-        }
-        Weight FN = new Weight(fragmentName);
-        Runnable send = () -> {
-            try {
-                Random random = new Random();
-                Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveTest(this.id, fragmentLevel, FN);
-            } catch (InterruptedException ignored) {
-            } catch (RemoteException e1) {
-                e1.printStackTrace();
-            }
-        };
-        new Thread(send).start();
     }
 
     private void updateEdgeState(Edge edge, EdgeState state) {
@@ -401,7 +291,7 @@ public class Node implements Runnable, Serializable, INode {
 
         ConnectMessage cm = null;
         for(ConnectMessage m : connectQueue) {
-            if(this.edgeStates.get(m) != EdgeState.UNKNOWN) {
+            if(EdgeState.UNKNOWN != this.edgeStates.get(m.edge)) {
                cm = m;
                break;
             }
@@ -449,8 +339,26 @@ public class Node implements Runnable, Serializable, INode {
         throw new RuntimeException("Node " + this.id + " is not familiar with an edge to " + from);
     }
 
-    public void printStatus() {
+    void printStatus() {
         System.out.println("[Node: " + this.id + ", Level: " + this.fragmentLevel + ", Core: " + this.fragmentName + "]");
+    }
+
+    private void sendMessage(MessageType type, Edge e, Weight core, Integer level, NodeState state) {
+        Integer receiverId = getReceiver(e);
+        INode receiver = findNode(receiverId);
+        if(receiver == null) {
+            throw new RuntimeException("Unable to find node with id " + receiverId);
+        }
+        Runnable send = () -> {
+            try {
+                Random random = new Random();
+                Thread.sleep(random.nextInt(NETWORK_DELAY));
+                receiver.receiveMessage(type, this.id, core, level, state);
+            } catch (InterruptedException | RemoteException e1) {
+                e1.printStackTrace();
+            }
+        };
+        new Thread(send).start();
     }
 
 }
