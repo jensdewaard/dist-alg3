@@ -5,7 +5,7 @@ public class Edge implements Comparable<Edge> {
 
     public Edge(Integer source, Integer target, Weight weight) {
         if(source.equals(target)) {
-            throw new EdgeException("Source node and target node are equal");
+            throw new RuntimeException("Source node and target node are equal");
         } else if(source > target) {
             
         }
@@ -33,6 +33,11 @@ public class Edge implements Comparable<Edge> {
                     this.weight.equals(((Edge) o).weight);
         }
         return false;
+    }
+
+    @Override
+    public int hashCode() {
+        return this.source.hashCode() + this.target.hashCode() + this.weight.hashCode();
     }
 
     public String toString() {

@@ -9,19 +9,19 @@ import java.util.*;
 public class Node implements Runnable, Serializable, INode {
     private final List<Edge> edges;
     private final Integer id;
-    private NodeState state = NodeState.SLEEPING;
-    private Integer fragmentLevel = 0; // the level of the fragment this node belongs to
-    private Weight fragmentName; // the name of the fragment this node belongs to
-    private Edge inBranch = null;  // the edge that leads to the fragment core
-    private Integer findCount; // the number of reports still expected
-    private Edge bestEdge; // the edge leading towards the best candidate for the moe
-    private Weight bestWeight = Weight.INFINITE; // the weight of the best candidate for the moe
-    private Edge testEdge; // the edge this node is currently testing for the moe
+    NodeState state = NodeState.SLEEPING;
+    Integer fragmentLevel = 0; // the level of the fragment this node belongs to
+    Weight fragmentName; // the name of the fragment this node belongs to
+    Edge inBranch = null;  // the edge that leads to the fragment core
+    Integer findCount; // the number of reports still expected
+    Edge bestEdge; // the edge leading towards the best candidate for the moe
+    Weight bestWeight = Weight.INFINITE; // the weight of the best candidate for the moe
+    Edge testEdge; // the edge this node is currently testing for the moe
     private Map<Edge, EdgeState> edgeStates;
     private final Integer NETWORK_DELAY = 150;
     private final ArrayList<ReportMessage> reportQueue;
     private final ArrayList<ConnectMessage> connectQueue;
-    private final ArrayList<TestMessage> testQueue;
+    final ArrayList<TestMessage> testQueue;
 
     Node(Integer id, List<Integer> neighbourIds) {
         this.id = id;
@@ -45,12 +45,18 @@ public class Node implements Runnable, Serializable, INode {
         HashMap<Edge, EdgeState> edgeStates = new HashMap<>();
         this.edges.forEach(e -> edgeStates.put(e, EdgeState.UNKNOWN));
         this.edgeStates = Collections.unmodifiableMap(edgeStates);
+        this.findCount = 0;
     }
 
     private void receiveInitiate(Integer from, Integer L, Weight F, NodeState S) {
         // Fragment IV
         System.out.println(from + " -> " + this.id + " INITIATE");
         Edge j = identifyEdge(from);
+        if(!this.edgeStates.get(j).equals(EdgeState.IN_MST)) {
+            throw new RuntimeException("Should only receive INITIATE from tree");
+        }
+        // We reset all variables because we are starting a new 'round' of looking
+        // for the moe
         this.fragmentLevel = L;
         this.fragmentName = F;
         this.state = S;
@@ -58,56 +64,105 @@ public class Node implements Runnable, Serializable, INode {
         this.bestEdge = null;
         this.bestWeight = Weight.INFINITE;
         for(Edge i : this.edges)  {
+            // Send initiate messages to all branches in the subtree that
+            // are not 'upstream'. So this floods the fragment with the
+            // initiate message so that all "border nodes" start searching
+            // for the moe
             if(!i.equals(j) && this.edgeStates.get(i) == EdgeState.IN_MST) {
                 sendMessage(MessageType.INITIATE, i, F, L, S);
-                if(this.state == NodeState.FIND) {
+                if(S == NodeState.FIND) {
+                    System.out.println(this.id + ": Now expecting a report from " + i);
                     this.findCount++;
                 }
             }
         }
-        if(this.state == NodeState.FIND) {
+        if(S == NodeState.FIND) {
             test();
         }
-        if(this.state == NodeState.FOUND) {
-            if(!reportQueue.isEmpty()) {
-                System.out.println(this.id + ": Popping a message from the report queue");
-                ReportMessage m = reportQueue.get(0);
-                reportQueue.remove(0);
-                this.receiveReport(m.from, m.weight);
-            }
+        processDeferredTests();
+    }
+
+    private void processDeferredTests() {
+        System.out.println("Entering process deferred tests");
+        List<TestMessage> copy = new ArrayList<>();
+        copy.addAll(testQueue);
+        while(!copy.isEmpty()) {
+            System.out.println("Copy has " + copy.size());
+            TestMessage tm = copy.get(0);
+            copy.remove(tm);
+            System.out.println("Copy now has " + copy.size());
+            this.receiveMessage(MessageType.TEST, tm.from, tm.weight, tm.level, null);
         }
-        if(!testQueue.isEmpty()) {
-            TestMessage tm = testQueue.get(0);
-            if(tm.level <= this.fragmentLevel) {
-                System.out.println(this.id + ": Popping a message from the test queue");
-                testQueue.remove(tm);
-                this.receiveTest(tm.from, tm.level, tm.weight);
+    }
+
+    private void processDeferredReports() {
+        List<ReportMessage> copy = new ArrayList<>(reportQueue);
+        while(!copy.isEmpty()) {
+            ReportMessage rm = copy.get(0);
+            copy.remove(rm);
+            System.out.println(this.id + ": Popping a message from the report queue");
+            this.receiveMessage(MessageType.REPORT, rm.from, rm.weight, null, null);
+        }
+    }
+
+//    private void receiveTest(Integer from, Integer l, Weight FN) {
+//        // Fragment VI
+//        System.out.println(from + " -> " + this.id + " TEST");
+//        if(this.state == NodeState.SLEEPING) {
+//            wakeup();
+//        }
+//        if(l.equals(0)) {
+//            throw new RuntimeException("Level 0 fragments should not be sending tests!");
+//        }
+//        Edge j = identifyEdge(from);
+//        if(this.fragmentName.equals(FN)) {
+//            sendMessage(MessageType.REJECT, j, null, null, null);
+//        } else if (this.fragmentLevel <= l) {
+//            sendMessage(MessageType.ACCEPT, j, null, null, null);
+//        } else {
+//            deferTest(from, l, FN);
+//        }
+//    }
+
+    private void receiveTest(Integer from, Integer l, Weight FN) {
+        System.out.println(from + " -> " + this.id + " TEST");
+        if(this.state == NodeState.SLEEPING) {
+            wakeup();
+        }
+        if(l.compareTo(this.fragmentLevel) > 0) {
+            deferTest(from, l, FN);
+        } else {
+            Edge j = identifyEdge(from);
+            if(!FN.equals(this.fragmentName)) {
+                this.sendMessage(MessageType.ACCEPT, j, null, null, null);
+            } else {
+                if(this.getEdgeState(j).equals(EdgeState.UNKNOWN)) {
+                    this.updateEdgeState(j, EdgeState.NOT_IN_MST);
+                }
+                if(!j.equals(this.testEdge)) {
+                    this.sendMessage(MessageType.REJECT, j, null, null, null);
+                } else {
+                    test();
+                }
             }
         }
 
     }
 
-    private void receiveTest(Integer from, Integer l, Weight FN) {
-        // Fragment VI
-        System.out.println(from + " -> " + this.id + " TEST");
-        if(this.state == NodeState.SLEEPING) {
-            wakeup();
-        }
-        Edge j = identifyEdge(from);
-        if(this.fragmentName.equals(FN)) {
-            sendMessage(MessageType.REJECT, j, null, null, null);
-        } else if (this.fragmentLevel <= l) {
-            sendMessage(MessageType.ACCEPT, j, null, null, null);
-        } else {
-            System.out.println(this.id + ": Appending to TEST Queue");
-            this.testQueue.add(new TestMessage(from, l, FN));
-        }
+    void deferTest(Integer from, Integer l, Weight FN) {
+        System.out.println(this.id + ": Appending to TEST Queue");
+        this.testQueue.add(new TestMessage(from, l, FN));
     }
 
     private void receiveAccept(Integer from) {
         // Fragment VIII
         System.out.println(from + " -> " + this.id + " ACCEPT");
         Edge j = identifyEdge(from);
+        if(!j.equals(testEdge)) {
+            throw new RuntimeException(
+                    "Receiving ACCEPT from an edge not being tested. (" +
+                            j + " != " + testEdge + ")");
+        }
         this.testEdge = null;
         if(j.weight.compareTo(bestWeight) < 0) {
             this.bestEdge = j;
@@ -117,7 +172,7 @@ public class Node implements Runnable, Serializable, INode {
 
     }
 
-    private void report() {
+    void report() {
         // Fragment IX
         if(this.findCount == 0 && this.testEdge == null) {
             this.state = NodeState.FOUND;
@@ -129,7 +184,14 @@ public class Node implements Runnable, Serializable, INode {
         // Fragment VII
         System.out.println(from + " -> " + this.id + " REJECT");
         Edge j = identifyEdge(from);
-        this.updateEdgeState(j, EdgeState.NOT_IN_MST);
+//        if(!j.equals(testEdge)) {
+//            throw new RuntimeException(
+//                    "Receiving REJECT from an edge not being tested. (" +
+//                            j + " != " + testEdge + ")");
+//        }
+        if(this.getEdgeState(j) == EdgeState.UNKNOWN) {
+            this.updateEdgeState(j, EdgeState.NOT_IN_MST);
+        }
         test();
     }
 
@@ -137,20 +199,29 @@ public class Node implements Runnable, Serializable, INode {
         // Fragment X
         System.out.println(from + " -> " + this.id + " REPORT: w = " + w);
         Edge j = identifyEdge(from);
-        if(!j.equals(inBranch)) {
+        if(!this.edgeStates.get(j).equals(EdgeState.IN_MST)) {
+            throw new RuntimeException("Should only receive reports from the tree branches");
+        }
+        if(!j.equals(inBranch)) { // report is coming from lower in the tree
+            if(this.findCount.equals(0)) {
+                throw new RuntimeException("Node " + this.id +" was not expecting reports");
+            }
             this.findCount -= 1;
+            System.out.println(this.id + ": " + findCount + " reports remaining");
             if(w.compareTo(bestWeight) < 0) {
                 bestWeight = w;
                 bestEdge = j;
             }
             report();
-        } else {
+            if(!reportQueue.isEmpty()) {
+                processDeferredReports();
+            }
+        } else { // report is coming from the co-owner of the core
             if(this.state == NodeState.FIND) {
-                System.out.println(this.id + ": Appending to REPORT queue");
-                this.reportQueue.add(new ReportMessage(from, w));
+                deferReport(new ReportMessage(from, w));
             } else {
                 if(w.compareTo(bestWeight) > 0) {
-                    System.out.println(this.id + ": Changing root...");
+                    System.out.println(this.id + ": Changing root, my subtree has the lower MOE");
                     changeRoot();
                 } else {
                     System.out.println(this.id + ": Not changing root, might halt");
@@ -162,7 +233,12 @@ public class Node implements Runnable, Serializable, INode {
         }
     }
 
-    private void changeRoot() {
+    void deferReport(ReportMessage reportMessage) {
+        System.out.println(this.id + ": Appending to REPORT queue");
+        this.reportQueue.add(reportMessage);
+    }
+
+    void changeRoot() {
         // Fragment XI
         if(this.edgeStates.get(bestEdge) == EdgeState.IN_MST) {
             sendMessage(MessageType.CHANGEROOT, bestEdge, null, null, null);
@@ -172,40 +248,58 @@ public class Node implements Runnable, Serializable, INode {
         }
     }
 
-    private void HALT() {
+    void HALT() {
         // TODO
         // misschien iets van een flag zodat er niet meer iets gedaan wordt met berichten?
         System.out.println("HALT!");
     }
 
-    private void receiveConnect(Integer from, Integer value) {
+    /**
+     * Has dependencies on the current node state, the edge state of the edge
+     * and the current fragment level
+     * @param from
+     * @param level
+     */
+    private void receiveConnect(Integer from, Integer level) {
         // Fragment III
         System.out.println(from + " -> " + this.id + " CONNECT");
+        if(from.equals(this.id)) {
+            throw new RuntimeException("Should not receive connect from self!");
+        }
         if(this.state == NodeState.SLEEPING) {
-            wakeup();
+            wakeup(); // this will change the state of the lowest outging edge..
         }
         Edge j = identifyEdge(from);
-        if(value < this.fragmentLevel) {
-            System.out.println(this.id + ": ABSORB");
-            updateEdgeState(j, EdgeState.IN_MST);
-            this.sendMessage(MessageType.INITIATE, j, fragmentName, fragmentLevel, state);
-            if(this.state == NodeState.FIND) {
-                this.findCount++;
-            }
+        if(level < this.fragmentLevel) {
+            absorb(j);
         } else {
-            if(this.edgeStates.get(j) == EdgeState.UNKNOWN) {
-                System.out.println(this.id + ": Appending to CONNECT queue");
-                this.connectQueue.add(new ConnectMessage(from, value, j));
+            if(this.edgeStates.get(j) == EdgeState.UNKNOWN) { // ..and that ruins my testing here
+                deferConnect(from, level, j);
             } else {
-                System.out.println(this.id + ": MERGE");
-                sendMessage(MessageType.INITIATE, j, j.weight, fragmentLevel +1, NodeState.FIND);
+                merge(j);
             }
         }
     }
 
-    private void receiveChangeRoot(Integer from) {
-        System.out.println(from + " -> " + id + " CHANGE-ROOT");
-        changeRoot();
+    void deferConnect(Integer from, Integer value, Edge j) {
+        System.out.println(this.id + ": Appending to CONNECT queue");
+        this.connectQueue.add(new ConnectMessage(from, value, j));
+    }
+
+    void merge(Edge j) {
+        System.out.println(this.id + ": MERGE");
+        sendMessage(MessageType.INITIATE, j, j.weight, fragmentLevel +1, NodeState.FIND);
+        updateEdgeState(j, EdgeState.IN_MST);
+    }
+
+    void absorb(Edge j) {
+        System.out.println(this.id + ": ABSORB");
+        updateEdgeState(j, EdgeState.IN_MST);
+        this.sendMessage(MessageType.INITIATE, j, fragmentName, fragmentLevel, state);
+        if(this.state == NodeState.FIND && !j.equals(inBranch)) {
+            System.out.println(this.id + ": Now expecting a report from " + j);
+            this.findCount++;
+        }
     }
 
     @Override
@@ -224,7 +318,8 @@ public class Node implements Runnable, Serializable, INode {
                 this.receiveReport(from, core);
                 break;
             case CHANGEROOT:
-                this.receiveChangeRoot(from);
+                System.out.println(from + " -> " + id + " CHANGE-ROOT");
+                changeRoot();
                 break;
             case CONNECT:
                 this.receiveConnect(from, level);
@@ -251,7 +346,7 @@ public class Node implements Runnable, Serializable, INode {
         }
     }
 
-    private void wakeup() {
+    void wakeup() {
         // Code Fragment II : Waking up
         Edge j = this.edges.get(0); // Edge list should be sorted on increasing weight
         System.out.println(this.id + ": Waking up");
@@ -267,10 +362,17 @@ public class Node implements Runnable, Serializable, INode {
         sendMessage(MessageType.CONNECT, j, null, fragmentLevel, null);
     }
 
-    private void test() {
+    void test() {
         // Fragment V
         for(Edge e : this.edges) {
+
             if(this.edgeStates.get(e) == EdgeState.UNKNOWN) {
+                //Prevent double test messages?
+                if(e.equals(this.testEdge)) return;
+                synchronized (this) {
+                    System.out.println("My edges are " + this.edgeStates);
+                    System.out.println("Sending a test over " + e + ", because it is not " + testEdge);
+                }
                 this.testEdge = e;
                 sendMessage(MessageType.TEST, e, fragmentName, fragmentLevel, null);
                 return;
@@ -280,27 +382,42 @@ public class Node implements Runnable, Serializable, INode {
         report();
     }
 
-    private void updateEdgeState(Edge edge, EdgeState state) {
-        if(this.edgeStates.get(edge) != EdgeState.UNKNOWN && this.edgeStates.get(edge) != state) {
-            throw new RuntimeException("Changing already set edge state. States should be stable");
+    void updateEdgeState(Edge edge, EdgeState state) {
+        EdgeState oldState = this.edgeStates.get(edge);
+        if(edge == null) {
+            throw new RuntimeException("Cannot update state of null");
+        }
+        if(state == null) {
+            throw new RuntimeException("Cannot set edge state to null");
+        }
+        if(state == EdgeState.UNKNOWN) {
+            throw new RuntimeException("Cannot set edge state to unknown");
+        }
+        if(oldState == null) {
+            throw new RuntimeException("Edge " + edge + " is not in this node");
+        }
+        if(oldState != EdgeState.UNKNOWN && oldState != state) {
+//            return;
+            throw new RuntimeException(
+                    "Changing already set edge state " + oldState
+                            + ". States should be stable");
         }
         Map<Edge, EdgeState> tempMap = new HashMap<>(this.edgeStates);
         tempMap.put(edge, state);
         this.edgeStates = Collections.unmodifiableMap(tempMap);
 
 
-        ConnectMessage cm = null;
-        for(ConnectMessage m : connectQueue) {
-            if(EdgeState.UNKNOWN != this.edgeStates.get(m.edge)) {
-               cm = m;
-               break;
-            }
-        }
-        if(cm != null) {
+        List<ConnectMessage> copy = new ArrayList<>(connectQueue);
+        while(!copy.isEmpty()) {
             System.out.println("Popping a message from the request queue");
-            connectQueue.remove(cm);
-            this.receiveConnect(cm.from, cm.value);
+            ConnectMessage cm = copy.get(0);
+            copy.remove(cm);
+            this.receiveMessage(MessageType.CONNECT, cm.from, null, cm.value, null);
         }
+    }
+
+    EdgeState getEdgeState(Edge edge) {
+        return this.edgeStates.get(edge);
     }
 
     private Integer getReceiver(Edge e) {
@@ -317,7 +434,7 @@ public class Node implements Runnable, Serializable, INode {
         }
     }
 
-    private INode findNode(Integer nodeId) {
+    INode findNode(Integer nodeId) {
         INode node = null;
         try {
             node = (INode) Naming.lookup("//localhost:1099/p" + nodeId);
@@ -329,10 +446,13 @@ public class Node implements Runnable, Serializable, INode {
         return node;
     }
 
-    private Edge identifyEdge(Integer from) {
+    Edge identifyEdge(Integer from) {
 //        System.out.println(this.id + ": Trying to find an edge to or from " + from);
         for (Edge e : this.edges) {
-            if (e.source.equals(from) || e.target.equals(from)) {
+            if (e.source.equals(from) && e.target.equals(this.id)) {
+                return e;
+            }
+            if (e.source.equals(this.id) && e.target.equals(from)) {
                 return e;
             }
         }
@@ -343,7 +463,15 @@ public class Node implements Runnable, Serializable, INode {
         System.out.println("[Node: " + this.id + ", Level: " + this.fragmentLevel + ", Core: " + this.fragmentName + "]");
     }
 
-    private void sendMessage(MessageType type, Edge e, Weight core, Integer level, NodeState state) {
+    /**
+     *
+     * @param type
+     * @param e The edge on which the message should be send
+     * @param core
+     * @param level
+     * @param state
+     */
+    void sendMessage(MessageType type, Edge e, Weight core, Integer level, NodeState state) {
         Integer receiverId = getReceiver(e);
         INode receiver = findNode(receiverId);
         if(receiver == null) {
@@ -361,4 +489,11 @@ public class Node implements Runnable, Serializable, INode {
         new Thread(send).start();
     }
 
+    void setState(NodeState state) {
+        this.state = state;
+    }
+
+    void setFragmentLevel(Integer level) {
+        this.fragmentLevel = level;
+    }
 }
