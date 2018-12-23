@@ -19,4 +19,10 @@ public class ReportMessage {
     public int hashCode() {
         return this.from.hashCode() + this.weight.hashCode();
     }
+
+    public boolean checkPreconditions(Edge j, Edge inBranch, NodeState state) {
+        // Report messages are deferred if w is equal to the inbranch
+        // and the state of FIND
+        return !j.equals(inBranch) || state != NodeState.FIND;
+    }
 }

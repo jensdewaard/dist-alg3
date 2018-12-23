@@ -24,4 +24,9 @@ public class TestMessage {
     public int hashCode() {
         return from.hashCode() + level.hashCode() + weight.hashCode();
     }
+
+
+    public boolean checkPreconditions(Integer fragmentLevel) {
+        return level.compareTo(fragmentLevel) <= 0;
+    }
 }

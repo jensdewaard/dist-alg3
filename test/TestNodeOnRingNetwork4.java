@@ -697,7 +697,8 @@ class TestNodeOnRingNetwork4 {
 
     @Nested class ReceiveTest {
         @Test void rejectsTestsFromSameFragment() {
-//            spy3.setState(NodeState.FIND);
+            spy3.setState(NodeState.FIND);
+            spy3.setFragmentLevel(1);
             spy3.fragmentName = e12.weight;
             spy3.receiveMessage(MessageType.TEST,
                     2,
@@ -711,7 +712,8 @@ class TestNodeOnRingNetwork4 {
         @Test void acceptsTestsFromSmallerFragments() {
             // If we receive a test from a smaller or equal fragment, we will accept
             // the test as we can absorb that fragment or merge with it
-//            spy3.setState(NodeState.FIND);
+            spy3.setState(NodeState.FIND);
+            spy3.fragmentLevel = 2;
             spy3.receiveMessage(MessageType.TEST,
                     2,
                     e12.weight,
@@ -721,7 +723,7 @@ class TestNodeOnRingNetwork4 {
         }
 
         @Test void acceptsTestsFromEqualSizeFragments() {
-//            spy3.setState(NodeState.FIND);
+            spy3.setState(NodeState.FIND);
             spy3.fragmentLevel = 1;
             spy3.receiveMessage(MessageType.TEST,
                     2,
@@ -782,13 +784,13 @@ class TestNodeOnRingNetwork4 {
             // if we receive a test from a larger fragment, we will wait
             // with responding until we are a larger or equal fragment ourselves
             spy3.setState(NodeState.FIND);
-            spy3.fragmentLevel = 2;
+            spy3.fragmentLevel = 1;
             spy3.receiveMessage(MessageType.TEST,
                     2,
                     e12.weight,
-                    1,
+                    2,
                     null);
-            verify(spy3).deferTest(2, 1, e12.weight);
+            verify(spy3).deferTest(2, 2, e12.weight);
         }
     }
 

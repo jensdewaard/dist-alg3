@@ -1,0 +1,48 @@
+/Library/Java/JavaVirtualMachines/jdk-9.0.1.jdk/Contents/Home/bin/java "-javaagent:/Users/jens/Library/Application Support/JetBrains/Toolbox/apps/IDEA-U/ch-0/183.4886.37/IntelliJ IDEA.app/Contents/lib/idea_rt.jar=55473:/Users/jens/Library/Application Support/JetBrains/Toolbox/apps/IDEA-U/ch-0/183.4886.37/IntelliJ IDEA.app/Contents/bin" -Dfile.encoding=UTF-8 -classpath /Users/jens/IdeaProjects/dist-alg3/out/production/dist-alg3:/Users/jens/IdeaProjects/dist-alg3/lib/mockito-core-2.23.4.jar:/Users/jens/IdeaProjects/dist-alg3/lib/byte-buddy-1.9.3.jar:/Users/jens/IdeaProjects/dist-alg3/lib/byte-buddy-agent-1.9.3.jar:/Users/jens/IdeaProjects/dist-alg3/lib/objenesis-2.6.jar:/Users/jens/IdeaProjects/dist-alg3/lib/ant-junit-1.6.5.jar Main input/1
+1: Created with edge list [[1, 2], [1, 4]]
+2: Created with edge list [[1, 2], [2, 3]]
+3: Created with edge list [[2, 3], [3, 4]]
+4: Created with edge list [[1, 4], [3, 4]]
+4: Waking up
+2: Waking up
+4 -> 1 CONNECT
+1: Waking up
+1: Appending to CONNECT queue
+1 -> 2 CONNECT
+2: MERGE along edge [1, 2]
+2 -> 1 INITIATE
+2 -> 1 CONNECT
+1: ABSORB along edge [1, 2]
+Popping a message from the request queue
+4 -> 1 CONNECT
+1: ABSORB along edge [1, 4]
+1: Now expecting a report from [1, 4]
+1 -> 4 TEST
+4: Appending to TEST Queue
+1 -> 4 INITIATE
+1 -> 4 TEST
+1 -> 2 INITIATE
+2 -> 3 TEST
+3: Waking up
+3: Appending to TEST Queue
+4 -> 3 TEST
+3: Appending to TEST Queue
+4 -> 1 REJECT
+3 -> 2 CONNECT
+2: ABSORB along edge [2, 3]
+2: Now expecting a report from [2, 3]
+2 -> 3 INITIATE
+2 -> 3 TEST
+4 -> 3 TEST
+3 -> 4 TEST
+3 -> 2 REJECT
+3 -> 2 REPORT: w = [2147483647,-1,-1]
+4 -> 1 REPORT: w = [2147483647,-1,-1]
+1: 0 reports remaining
+2: 0 reports remaining
+2 -> 1 REPORT: w = [2147483647,-1,-1]
+1: Not changing root, might halt
+HALT!
+1 -> 2 REPORT: w = [2147483647,-1,-1]
+2: Not changing root, might halt
+HALT!
