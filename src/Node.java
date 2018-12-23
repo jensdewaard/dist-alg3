@@ -23,6 +23,9 @@ public class Node implements Runnable, Serializable, INode {
     private final ArrayList<ReportMessage> reportQueue;
     private final ArrayList<ConnectMessage> connectQueue;
     final ArrayList<TestMessage> testQueue;
+    private final Map<Edge, List<Message>> messageQueues;
+    private final Map<Edge, Integer> sendCounter;
+    private final Map<Edge, Integer> receiveCounter;
 
     Node(Integer id, List<Integer> neighbourIds) {
         this.id = id;
@@ -41,6 +44,15 @@ public class Node implements Runnable, Serializable, INode {
         });
         Collections.sort(edges);
         this.edges = Collections.unmodifiableList(edges);
+        this.messageQueues = new HashMap<>();
+        this.sendCounter = new HashMap<>();
+        this.receiveCounter = new HashMap<>();
+        for(Edge e : this.edges) {
+            this.messageQueues.put(e, new ArrayList<>());
+            this.sendCounter.put(e, 0);
+            this.receiveCounter.put(e, 0);
+        }
+
         System.out.println(this.id + ": Created with edge list " + this.edges);
         this.fragmentName = this.edges.get(0).weight;
         // Keep a list of states corresponding to the above edges
@@ -91,7 +103,7 @@ public class Node implements Runnable, Serializable, INode {
                 TestMessage tm = testQueue.get(0);
                 if(tm.checkPreconditions(this.fragmentLevel)) {
                     testQueue.remove(tm);
-                    this.receiveMessage(MessageType.TEST, tm.from, tm.weight, tm.level, null);
+                    this.receiveTest(tm.from, tm.level, tm.weight);
                 } else {
                     return;
                 }
@@ -107,7 +119,7 @@ public class Node implements Runnable, Serializable, INode {
                 if(rm.checkPreconditions(j, this.inBranch, this.state)) {
                     reportQueue.remove(rm);
                     System.out.println(this.id + ": Popping a message from the report queue");
-                    this.receiveMessage(MessageType.REPORT, rm.from, rm.weight, null, null);
+                    this.receiveReport(rm.from, rm.weight);
                 } else {
                     return;
                 }
@@ -290,36 +302,65 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     @Override
-    public void receiveMessage(MessageType type, Integer from, Weight core, Integer level, NodeState state) {
-        System.out.println(this.id + ": Receiving " + type + " from " + from);
-        switch(type) {
-            case ACCEPT:
-                this.receiveAccept(from);
-                break;
-            case REJECT:
-                this.receiveReject(from);
-                break;
-            case TEST:
-                this.receiveTest(from, level, core);
-                break;
-            case REPORT:
-                this.receiveReport(from, core);
-                break;
-            case CHANGEROOT:
-                changeRoot();
-                break;
-            case CONNECT:
-                this.receiveConnect(from, level);
-                break;
-            case INITIATE:
-                this.receiveInitiate(from, level, core, state);
-                break;
-            default:
-                throw new RuntimeException("Unknown message type received");
+    public void receiveMessage(Message m) {
+        MessageType type = m.type;
+        Integer from = m.sender;
+        Edge e = identifyEdge(from);
+        if(!m.clock.equals(this.receiveCounter.get(e))) {
+            // this is not the expected message, it has overtaken another on the same edge
+            System.out.println(this.id + ": Message received with clock " + m.clock + ", expecting " + this.receiveCounter.get(e));
+            List<Message> edgeQueue = this.messageQueues.get(e);
+            edgeQueue.add(m);
+            Collections.sort(edgeQueue);
+        } else {
+            System.out.println(this.id + ": Receiving " + type + " from " + from);
+            Integer recCount = this.receiveCounter.get(e);
+            this.receiveCounter.put(e, recCount + 1);
+            switch(m.type) {
+                case ACCEPT:
+                    this.receiveAccept(from);
+                    break;
+                case REJECT:
+                    this.receiveReject(from);
+                    break;
+                case TEST:
+                    this.receiveTest(from, m.level, m.core);
+                    break;
+                case REPORT:
+                    this.receiveReport(from, m.core);
+                    break;
+                case CHANGEROOT:
+                    changeRoot();
+                    break;
+                case CONNECT:
+                    this.receiveConnect(from, m.level);
+                    break;
+                case INITIATE:
+                    this.receiveInitiate(from, m.level, m.core, m.state);
+                    break;
+                default:
+                    throw new RuntimeException("Unknown message type received");
+            }
+            synchronized (this) {
+                List<Message> edgeQueue = this.messageQueues.get(e);
+                if(!edgeQueue.isEmpty()) {
+                    Message top = edgeQueue.get(0);
+                    if (this.receiveCounter.get(e).equals(top.clock)) {
+                        edgeQueue.remove(top);
+                        this.receiveMessage(top);
+                    }
+                }
+            }
+            processDeferredConnects();
+            processDeferredReports();
+            processDeferredTests();
         }
-        processDeferredConnects();
-        processDeferredReports();
-        processDeferredTests();
+
+    }
+
+    @Override
+    public void receiveMessage(MessageType type, Integer from, Weight w, Integer level, NodeState state) {
+        throw new RuntimeException("This is a dummy function, do not call it");
     }
 
     @Override
@@ -403,7 +444,7 @@ public class Node implements Runnable, Serializable, INode {
                 if(cm.checkPreconditions(this.fragmentLevel, es)) {
                     System.out.println("Popping a message from the request queue");
                     connectQueue.remove(cm);
-                    this.receiveMessage(MessageType.CONNECT, cm.from, null, cm.value, null);
+                    this.receiveConnect(cm.from, cm.value);
                 } else {
                     return;
                 }
@@ -480,8 +521,11 @@ public class Node implements Runnable, Serializable, INode {
             try {
                 System.out.println(this.id + ": Sending (" + type + "," + core + "," + level + ") to " + receiverId);
                 Random random = new Random();
+                Integer timestamp = this.sendCounter.get(e);
+                this.sendCounter.put(e, timestamp + 1);
                 Thread.sleep(random.nextInt(NETWORK_DELAY));
-                receiver.receiveMessage(type, this.id, core, level, state);
+                Message m = new Message(type, timestamp, this.id, core, level, state);
+                receiver.receiveMessage(m);
             } catch (InterruptedException | RemoteException e1) {
                 e1.printStackTrace();
             }
