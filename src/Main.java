@@ -1,5 +1,4 @@
-import java.io.FileNotFoundException;
-import java.io.FileReader;
+import java.io.*;
 import java.rmi.AccessException;
 import java.rmi.AlreadyBoundException;
 import java.rmi.NotBoundException;
@@ -15,7 +14,17 @@ import java.util.Scanner;
 public class Main {
 
     public static void main(String[] args) throws RemoteException, AlreadyBoundException, FileNotFoundException {
-        FileReader fileReader = new FileReader(args[0]);
+        String fileName = "1";
+        String in = "input/" + fileName;
+//        PrintStream out = new PrintStream(new FileOutputStream(new File("output/" + fileName)));
+//        System.setOut(out);
+        runOnFile(in);
+//        out.flush();
+//        out.close();
+    }
+
+    private static void runOnFile(String arg) throws FileNotFoundException, RemoteException, AlreadyBoundException {
+        FileReader fileReader = new FileReader(arg);
         Scanner scanner = new Scanner(fileReader);
 
         List<Integer> allIds = new ArrayList<>();
@@ -54,6 +63,5 @@ public class Main {
                 }
             }
         }));
-
     }
 }
