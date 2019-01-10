@@ -27,21 +27,13 @@ public class Node implements Runnable, Serializable, INode {
     private final Map<Edge, Integer> sendCounter;
     private final Map<Edge, Integer> receiveCounter;
 
-    Node(Integer id, List<Integer> neighbourIds) {
+    Node(Integer id, List<Edge> edges) {
         this.id = id;
         this.reportQueue = new ArrayList<>();
         this.connectQueue = new ArrayList<>();
         this.testQueue = new ArrayList<>();
         this.expectedReports = new HashSet<>();
         // Create list of edges connected to this node
-        ArrayList<Edge> edges = new ArrayList<>();
-        neighbourIds.forEach(n -> {
-            if(id < n) { // current node is the lower id
-               edges.add(new Edge(id, n, new Weight(1, id, n)));
-            } else {
-                edges.add(new Edge(n, id, new Weight(1, n, id)));
-            }
-        });
         Collections.sort(edges);
         this.edges = Collections.unmodifiableList(edges);
         this.messageQueues = new HashMap<>();
