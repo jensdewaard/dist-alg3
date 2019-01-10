@@ -52,4 +52,8 @@ public class Weight implements Serializable, Comparable<Weight> {
     public int hashCode() {
         return lowerId.hashCode() + higherId.hashCode() + weight.hashCode();
     }
+
+    public Integer value() {
+        return this.weight;
+    }
 }

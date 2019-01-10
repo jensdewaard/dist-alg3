@@ -488,11 +488,18 @@ public class Node implements Runnable, Serializable, INode {
     }
 
     void printStatus() {
-        String connectStatus = connectQueue.isEmpty() ? "0" : "1";
-        String testStatus = testQueue.isEmpty() ? "0" : "1";
-        String reportStatus = reportQueue.isEmpty() ? "0" : "1";
-        System.out.println("[Node: " + this.id + ", Level: " + this.fragmentLevel + ", Core: " + this.fragmentName
-                + " [ " + connectStatus + testStatus + reportStatus + "]]");
+//        String connectStatus = connectQueue.isEmpty() ? "0" : "1";
+//        String testStatus = testQueue.isEmpty() ? "0" : "1";
+//        String reportStatus = reportQueue.isEmpty() ? "0" : "1";
+//        System.out.println("[Node: " + this.id + ", Level: " + this.fragmentLevel + ", Core: " + this.fragmentName
+//                + " [ " + connectStatus + testStatus + reportStatus + "]]");
+        for (Edge edge : this.edgeStates.keySet()) {
+            if (this.edgeStates.get(edge).equals(EdgeState.IN_MST)) {
+                if (this.id.equals(edge.source)) {
+                    System.out.println(edge.source + " " + edge.target + " " + edge.weight.value());
+                }
+            }
+        }
     }
 
     /**
